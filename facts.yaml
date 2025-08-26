@@ -1,0 +1,220 @@
+
+facts:
+- name: LOAN_PURPOSE_NAME_HOME_IMPROVEMENT
+  expr: LOAN_PURPOSE_NAME_HOME_IMPROVEMENT
+  data_type: NUMBER(38,0)
+  sample_values:
+    - '1'
+    - '0'
+  description: Indicates whether the loan was used for home improvement purposes (1) or not (0).
+  synonyms:
+    - home_renovation
+    - home_renovation_loan
+    - home_upgrade
+    - home_improvement_finance
+    - home_rehabilitation
+    - home_renovation_purpose
+- name: LOAN_PURPOSE_NAME_HOME_PURCHASE
+  expr: LOAN_PURPOSE_NAME_HOME_PURCHASE
+  data_type: NUMBER(38,0)
+  sample_values:
+    - '1'
+    - '0'
+  description: Indicates whether the loan was used for purchasing a home (1) or not (0).
+  synonyms:
+    - home_buying
+    - primary_residence_purchase
+    - home_acquisition
+    - house_buying
+    - residential_purchase
+    - home_loan_purpose
+    - purchase_of_primary_residence
+- name: LOAN_PURPOSE_NAME_REFINANCING
+  expr: LOAN_PURPOSE_NAME_REFINANCING
+  data_type: NUMBER(38,0)
+  sample_values:
+    - '1'
+    - '0'
+  description: Indicates whether the loan was used for refinancing an existing mortgage (1) or not (0).
+  synonyms:
+    - refinancing_loan
+    - loan_refinance
+    - refinance_purpose
+    - loan_restructuring
+    - mortgage_refinance
+    - loan_renewal
+- name: MORTGAGERESPONSE
+  expr: MORTGAGERESPONSE
+  data_type: NUMBER(38,0)
+  sample_values:
+    - '1'
+    - '0'
+  description: Indicates whether the mortgage application was approved (1) or denied (0).
+  synonyms:
+    - mortgage_approval
+    - loan_response
+    - mortgage_decision
+    - loan_outcome
+    - mortgage_result
+    - lender_response
+- name: MONTH
+  expr: MONTH
+  data_type: NUMBER(38,0)
+  sample_values:
+    - '6'
+    - '11'
+    - '7'
+  description: The month in which the mortgage was originated, represented as a numerical value (1-12).
+  synonyms:
+    - month_of_year
+    - calendar_month
+    - month_number
+    - monthly_period
+    - month_value
+- name: DAY_OF_YEAR
+  expr: DAY_OF_YEAR
+  data_type: NUMBER(38,0)
+  sample_values:
+    - '208'
+    - '108'
+    - '90'
+  description: The day of the year on which the mortgage was originated, with January 1st being day 1 and December 31st being day 365 (366 in a leap year).
+  synonyms:
+    - day_of_calendar
+    - julian_day
+    - day_number
+    - annual_day
+    - yearly_day
+    - day_in_year
+- name: DOTW
+  expr: DOTW
+  data_type: NUMBER(38,0)
+  sample_values:
+    - '5'
+    - '2'
+    - '6'
+  description: Day of the week the mortgage application was received, where 1 = Monday, 2 = Tuesday, 3 = Wednesday, 4 = Thursday, 5 = Friday, 6 = Saturday, and 7 = Sunday.
+  synonyms:
+    - day_of_week
+    - day_of_week_number
+    - weekday
+    - day_number
+    - day_index
+- name: LOAN_AMOUNT
+  expr: LOAN_AMOUNT
+  data_type: NUMBER(38,0)
+  sample_values:
+    - '1080000'
+    - '2000000'
+    - '1240000'
+  description: The total amount borrowed by a customer to purchase a property, which is the initial amount of the loan.
+  synonyms:
+    - loan_value
+    - borrowed_amount
+    - loan_size
+    - loan_principal
+    - amount_financed
+    - loan_size_amount
+- name: INCOME
+  expr: INCOME
+  data_type: FLOAT
+  sample_values:
+    - '260000'
+    - '84000'
+    - '105000'
+  description: The annual income of the mortgage applicant.
+  synonyms:
+    - annual_income
+    - yearly_earnings
+    - household_income
+    - salary
+    - wages
+    - earnings
+    - revenue
+    - total_income
+    - gross_income
+- name: INCOME_LOAN_RATIO
+  expr: INCOME_LOAN_RATIO
+  data_type: FLOAT
+  sample_values:
+    - '0.3578947484'
+    - '0.5545171499'
+    - '0.5787546039'
+  description: The ratio of the loan amount to the borrower's income, representing the proportion of their income that goes towards loan repayment.
+  synonyms:
+    - income_to_loan_proportion
+    - loan_to_income_ratio
+    - income_loan_proportion
+    - debt_to_income_ratio
+    - loan_affordability_ratio
+    - income_debt_ratio
+- name: MEAN_COUNTY_INCOME
+  expr: MEAN_COUNTY_INCOME
+  data_type: FLOAT
+  sample_values:
+    - '65260.796875'
+    - '80565.984375'
+    - '103045.3359375'
+  description: The average annual income of residents in the county where the mortgage property is located.
+  synonyms:
+    - average_county_income
+    - median_county_income
+    - county_average_earnings
+    - average_household_income
+    - mean_household_income
+    - average_annual_income
+    - county_median_earnings
+- name: HIGH_INCOME_FLAG
+  expr: HIGH_INCOME_FLAG
+  data_type: NUMBER(38,0)
+  sample_values:
+    - '1'
+    - '0'
+  description: Indicates whether the borrower's income is considered high income, where 1 represents high income and 0 represents non-high income.
+  synonyms:
+    - high_earner_indicator
+    - high_income_status
+    - affluent_flag
+    - high_income_designation
+    - high_wealth_indicator
+    - high_income_category
+- name: AVG_THIRTY_DAY_LOAN_AMOUNT
+  expr: AVG_THIRTY_DAY_LOAN_AMOUNT
+  data_type: FLOAT
+  sample_values:
+    - '402969.75'
+    - '403552.75'
+    - '97459.7734375'
+  description: The average amount borrowed by customers who have taken out a 30-day loan.
+  synonyms:
+    - average_thirty_day_loan
+    - thirty_day_average_loan
+    - mean_thirty_day_loan_amount
+    - thirty_day_loan_average
+    - average_loan_amount_last_thirty_days
+- name: XGB_BASE_PREDICTION
+  expr: XGB_BASE_PREDICTION
+  data_type: NUMBER(38,0)
+  sample_values:
+    - '1'
+    - '0'
+  description: Predicted probability of a mortgage application being approved, as determined by an Extreme Gradient Boosting (XGB) model, with 1 indicating a high likelihood of approval and 0 indicating a low likelihood of approval.
+  synonyms:
+    - base_xgb_score
+    - initial_xgb_prediction
+    - xgb_initial_output
+    - base_prediction_score
+    - initial_model_prediction
+- name: XGB_OPTIMIZED_PREDICTION
+  expr: XGB_OPTIMIZED_PREDICTION
+  data_type: NUMBER(38,0)
+  sample_values:
+    - '1'
+    - '0'
+  description: Predicted likelihood of mortgage approval using optimized XGBoost model, where 1 indicates a high likelihood of approval and 0 indicates a low likelihood of approval.
+  synonyms:
+    - optimized_xgb_score
+    - xgb_refined_prediction
+    - enhanced_xgb_output
+    - xgb_tuned_result
+    - improved_xgb_forecast

@@ -1,0 +1,4 @@
+# Core dependencies for Dynamic Semantic Model Generator
+snowflake-connector-python>=3.4.0
+pandas>=1.5.0
+PyYAML>=6.0

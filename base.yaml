@@ -1,0 +1,50 @@
+name: mortgage_lending_prediction
+description: Data model containing information on mortgage loans applications. Rows represent individual loan applications. Columns represent information on the type/amount/terms of loan as well as income and other characteristics of the applicant.
+tables:
+  - name: DEMO_MORTGAGE_LENDING_TEST_0
+    base_table:
+      database: E2E_SNOW_MLOPS_DB
+      schema: MLOPS_SCHEMA
+      table: DEMO_MORTGAGE_LENDING_TEST_0
+    time_dimensions:
+      - name: TIMESTAMP
+        expr: TIMESTAMP
+        data_type: TIMESTAMP_NTZ(9)
+        sample_values:
+          - 2024-07-26T13:44:41.280+0000
+          - 2025-03-17T07:39:12.960+0000
+          - 2025-03-13T23:24:34.560+0000
+        description: Date and time when the mortgage lending data was recorded or updated.
+        synonyms:
+          - date
+          - datetime
+          - creation_time
+          - record_time
+          - log_time
+          - event_time
+          - entry_time
+          - timestamp_value
+          - time_of_entry
+    facts:
+      - name: LOAN_ID
+        expr: LOAN_ID
+        data_type: NUMBER(38,0)
+        sample_values:
+          - '172693'
+          - '296183'
+          - '409445'
+        description: Unique identifier for a mortgage loan.
+        synonyms:
+          - loan_number
+          - mortgage_id
+          - loan_identifier
+          - account_number
+          - mortgage_account_id
+          - loan_reference_number
+verified_queries:
+  - name: Loan info for given loan_ID
+    question: What is the application info for loan id 100038
+    use_as_onboarding_question: false
+    sql: SELECT * FROM demo_mortgage_lending_test_1 WHERE loan_id = 100038
+    verified_by: Elliott Botwick
+    verified_at: 1747262312
