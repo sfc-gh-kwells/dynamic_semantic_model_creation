@@ -1,402 +1,237 @@
-# Dynamic Semantic Model Generator
+# Cortex Analyst Dynamic Semantic Model Generator
 
-Customers with over 500 columns in a table run into semantic model file size limits due to LLM context window limits. 
+A Python tool for dynamically generating semantic models and integrating with Snowflake's Cortex Analyst REST API. This tool allows you to create semantic models from Snowflake data dictionary queries and use them directly with Cortex Analyst for natural language data analysis.
 
-To solve this, we use a Python tool for dynamically generating semantic models by combining base configurations with selected facts from data dictionaries. Includes Snowflake integration for querying data dictionaries and uploading generated models to stages.
+## Features
 
-## 🚀 Features
+- 🚀 **Dynamic Semantic Model Generation**: Generate semantic models from Snowflake queries
+- 🤖 **Cortex Analyst Integration**: Direct integration with Snowflake's Cortex Analyst REST API  
+- 🔐 **Multiple Authentication Methods**: Support for Personal Access Tokens (PAT) and password authentication
+- 📊 **Flexible Data Sources**: Query your data dictionary to dynamically select facts
+- 🎯 **Easy Configuration**: Simple configuration file setup
+- ⚡ **API-First Design**: Generate YAML strings for direct API use (no file uploads required)
 
-- **Dynamic Fact Selection**: Choose specific facts from a pre-defined facts library
-- **Snowflake Integration**: Query data dictionaries directly from Snowflake
-- **Stage Upload**: Automatically upload generated models to Snowflake stages with unique timestamps
-- **Flexible Configuration**: Support for environment variables and direct credentials
-- **YAML Management**: Robust YAML parsing, generation, and validation
-- **Batch Processing**: Generate multiple models with different fact combinations
+## Quick Start
 
-## 📁 Project Structure
+### 1. Installation
 
-```
-ca_dynamic_semantic_model/
-├── main.py                          # Core functionality
-├── base.yaml                        # Base semantic model template
-├── facts.yaml                       # Library of pre-defined facts
-├── snowflake_example.py            # Usage examples with Snowflake
-├── demo_stage_upload.py            # Demo of stage upload functionality
-├── test_snowflake_integration.py   # Test script for workflow simulation
-└── README.md                       # This file
-```
-
-## 🛠️ Installation
-
-### Requirements
-
-```bash
-pip install snowflake-connector-python pandas pyyaml
-```
-
-### Environment Setup
-
-1. Clone this repository:
-```bash
-git clone <repository-url>
-cd ca_dynamic_semantic_model
-```
-
-2. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Set up Snowflake environment variables (optional but recommended):
+### 2. Configuration
+
+Copy the configuration template and fill in your Snowflake details:
+
 ```bash
-export SNOWFLAKE_ACCOUNT=your_account.region
-export SNOWFLAKE_USER=your_username
-export SNOWFLAKE_PASSWORD=your_password
-export SNOWFLAKE_WAREHOUSE=your_warehouse
-export SNOWFLAKE_DATABASE=your_database
-export SNOWFLAKE_SCHEMA=your_schema
-export SNOWFLAKE_ROLE=your_role  # Optional
+cp config.env.template config.env
 ```
 
-## 🎯 Quick Start
+Edit `config.env` with your Snowflake connection details:
 
-### 1. Generate Model with Specific Facts
-
-```python
-from main import generate_dynamic_semantic_model
-
-# Select specific facts from facts.yaml
-fact_names = ["LOAN_AMOUNT", "INCOME", "MORTGAGERESPONSE"]
-model = generate_dynamic_semantic_model(
-    fact_names=fact_names,
-    output_path="my_semantic_model.yaml"
-)
+```ini
+[connections.my_example_connection]
+account = your_account_identifier.region
+user = your_username
+token = your_personal_access_token
+role = your_role_name
+warehouse = your_warehouse_name  
+database = your_database_name
+schema = your_schema_name
 ```
 
-### 2. Generate Model from Snowflake Data Dictionary
+### 3. Get Your Personal Access Token (PAT)
+
+1. Log into Snowsight
+2. Go to **Account** > **Security** > **Personal Access Tokens**
+3. Create a new token and copy it to your config file
+
+### 4. Test the Integration
+
+Test with a pre-built semantic model:
+```bash
+python test_api_only.py
+```
+
+Test full integration (requires Snowflake connection):
+```bash
+python main.py test
+```
+
+## Usage Examples
+
+### Generate Semantic Model from Query
 
 ```python
 from main import generate_semantic_model_from_snowflake
 
-# Query data dictionary and generate model
+# Generate semantic model from a data dictionary query
 query = """
-SELECT ELEMENT_NUMBER
-FROM your_database.your_schema.data_dictionary_table
-WHERE table_name = 'your_target_table'
+SELECT ELEMENT_NUMBER 
+FROM your_database.your_schema.data_dictionary_table 
+WHERE condition = 'your_filter'
 """
 
-model = generate_semantic_model_from_snowflake(
+# Option 1: Return as YAML string for direct API use
+semantic_model_yaml = generate_semantic_model_from_snowflake(
     query=query,
     account='your_account.region',
     user='your_username',
-    password='your_password',
+    token='your_pat_token',
+    warehouse='your_warehouse',
+    database='your_database', 
+    schema='your_schema',
+    return_yaml_string=True
+)
+
+# Option 2: Use environment variables
+model = generate_semantic_model_from_env_and_query(
+    query=query,
+    return_yaml_string=True
+)
+```
+
+### Use with Cortex Analyst API
+
+```python
+from main import CortexAnalystClient
+
+# Initialize client with PAT
+client = CortexAnalystClient(
+    account_url='https://your_account.snowflakecomputing.com',
+    authorization_token='your_pat_token',
+    token_type='PROGRAMMATIC_ACCESS_TOKEN'
+)
+
+# Ask questions about your data
+response = client.send_message(
+    question="What is the total revenue last quarter?",
+    semantic_model=semantic_model_yaml
+)
+
+# Extract SQL and analysis
+for content in response['message']['content']:
+    if content['type'] == 'sql':
+        print(f"Generated SQL: {content['statement']}")
+    elif content['type'] == 'text':
+        print(f"Analysis: {content['text']}")
+```
+
+### Complete End-to-End Workflow
+
+```python
+from main import generate_and_query_with_cortex_analyst, CortexAnalystClient
+
+client = CortexAnalystClient(
+    account_url='https://your_account.snowflakecomputing.com',
+    authorization_token='your_pat_token'
+)
+
+# This does everything: generates model and queries Cortex Analyst
+response = generate_and_query_with_cortex_analyst(
+    query="SELECT ELEMENT_NUMBER FROM data_dictionary WHERE active=1",
+    user_question="Which products had the highest sales?",
+    client=client,
+    account='your_account',
+    user='your_username',
+    token='your_pat_token',
     warehouse='your_warehouse',
     database='your_database',
-    schema='your_schema',
-    output_path='generated_model.yaml'
+    schema='your_schema'
 )
 ```
 
-### 3. Generate and Upload to Snowflake Stage
+## Environment Variables
 
-```python
-from main import generate_semantic_model_from_env_and_query
+You can use environment variables instead of the config file:
 
-# Uses environment variables for connection
-model = generate_semantic_model_from_env_and_query(
-    query=query,
-    output_path='local_model.yaml',
-    stage_name='@my_models_stage/semantic_models/',
-    stage_filename_base='mortgage_model'
-)
-# Creates: mortgage_model_20241215_143532.yaml in the stage
-```
-
-## 📋 Core Components
-
-### Base Configuration (`base.yaml`)
-
-Contains the foundational semantic model structure:
-- Model name and description
-- Table definitions
-- Time dimensions
-- Verified queries
-
-### Facts Library (`facts.yaml`)
-
-Pre-defined facts with complete definitions:
-- Fact names, expressions, and data types
-- Descriptions and sample values
-- Synonyms for natural language queries
-
-### Dynamic Generation Process
-
-1. **Query Execution**: Run SQL query against Snowflake data dictionary
-2. **Fact Extraction**: Extract `ELEMENT_NUMBER` values from query results
-3. **Fact Lookup**: Match against pre-defined facts in `facts.yaml`
-4. **Model Assembly**: Combine `base.yaml` with selected facts
-5. **Output Generation**: Save locally and/or upload to Snowflake stage
-
-## 🔧 Configuration Options
-
-### Snowflake Connection
-
-#### Method 1: Environment Variables (Recommended)
 ```bash
-export SNOWFLAKE_ACCOUNT=abc123.us-east-1
-export SNOWFLAKE_USER=your_user
-export SNOWFLAKE_PASSWORD=your_password
-export SNOWFLAKE_WAREHOUSE=COMPUTE_WH
-export SNOWFLAKE_DATABASE=ANALYTICS_DB
-export SNOWFLAKE_SCHEMA=DATA_DICTIONARY
+export SNOWFLAKE_ACCOUNT=your_account.region
+export SNOWFLAKE_USER=your_username
+export SNOWFLAKE_PAT=your_personal_access_token
+export SNOWFLAKE_ROLE=your_role
+export SNOWFLAKE_WAREHOUSE=your_warehouse
+export SNOWFLAKE_DATABASE=your_database
+export SNOWFLAKE_SCHEMA=your_schema
 ```
 
-#### Method 2: Direct Parameters
-```python
-connection_params = {
-    'account': 'abc123.us-east-1',
-    'user': 'your_user',
-    'password': 'your_password',
-    'warehouse': 'COMPUTE_WH',
-    'database': 'ANALYTICS_DB',
-    'schema': 'DATA_DICTIONARY'
-}
+## File Structure
+
+```
+ca_dynamic_semantic_model/
+├── main.py                           # Main library with all functions
+├── test_api_only.py                  # Test Cortex Analyst API only
+├── config.env.template               # Configuration template
+├── config.env                        # Your configuration (do not commit)
+├── base.yaml                         # Base semantic model template
+├── facts.yaml                        # Predefined facts library
+├── generated_model_example1.yaml     # Example generated model
+├── generated_model_loan_focus.yaml   # Another example model
+└── requirements.txt                  # Python dependencies
 ```
 
-### Stage Upload Configuration
+## Key Functions
 
-#### Stage Name Formats
-- `@my_stage` - Root of named stage
-- `@my_stage/models/` - Subfolder in named stage
-- `my_stage/folder/` - Auto-adds @ prefix
-- `@%temp_stage` - User stage
+- `generate_semantic_model_from_snowflake()`: Generate model from Snowflake query
+- `generate_semantic_model_from_env_and_query()`: Generate using environment variables
+- `CortexAnalystClient`: REST API client for Cortex Analyst
+- `generate_and_query_with_cortex_analyst()`: End-to-end workflow
 
-#### Filename Generation
-Files are automatically timestamped: `{base_name}_{YYYYMMDD_HHMMSS}.yaml`
+## Authentication
 
-Examples:
-- `semantic_model_20241215_143532.yaml`
-- `mortgage_facts_20241215_143532.yaml`
+### Personal Access Token (PAT) - Recommended
+- Generate in Snowsight under Account > Security > Personal Access Tokens
+- **PATs work as password replacements** in Snowflake drivers, APIs, and libraries
+- Best for API integrations and automation
+- Use `token` parameter in functions (automatically converted to password replacement)
 
-## 📊 Data Dictionary Requirements
+### Password Authentication
+- Traditional username/password
+- Use `password` parameter in functions
 
-Your Snowflake data dictionary query must return an `ELEMENT_NUMBER` column containing fact names that match entries in `facts.yaml`.
+**Note:** According to Snowflake documentation, PATs can be used as a replacement for passwords in:
+- Snowflake drivers (including snowflake-connector-python)
+- Third-party applications (Tableau, PowerBI, etc.)
+- Snowflake APIs and libraries (Snowpark, Python API)
+- Command-line clients (Snowflake CLI, SnowSQL)
 
-### Example Query
-```sql
-SELECT ELEMENT_NUMBER
-FROM analytics_db.data_dictionary.table_metadata
-WHERE table_name = 'mortgage_lending'
-  AND is_active = true
-ORDER BY element_number
-```
-
-### Expected Results
-```
-┌─────────────────┐
-│ ELEMENT_NUMBER  │
-├─────────────────┤
-│ LOAN_AMOUNT     │
-│ INCOME          │
-│ MORTGAGERESPONSE│
-│ HIGH_INCOME_FLAG│
-└─────────────────┘
-```
-
-## 🎪 Usage Examples
-
-### Example 1: Loan Analysis Model
-```python
-# Generate model focused on loan analysis
-loan_facts = ["LOAN_AMOUNT", "INCOME", "INCOME_LOAN_RATIO", "MORTGAGERESPONSE"]
-loan_model = generate_dynamic_semantic_model(
-    fact_names=loan_facts,
-    output_path="loan_analysis_model.yaml"
-)
-```
-
-### Example 2: Customer Demographics Model
-```python
-# Generate model for customer demographics
-demo_facts = ["INCOME", "HIGH_INCOME_FLAG", "MEAN_COUNTY_INCOME"]
-demo_model = generate_dynamic_semantic_model(
-    fact_names=demo_facts,
-    output_path="customer_demographics_model.yaml"
-)
-```
-
-### Example 3: Production Pipeline with Stage Upload
-```python
-# Production workflow with automatic stage upload
-query = """
-SELECT ELEMENT_NUMBER 
-FROM prod_db.metadata.data_dictionary 
-WHERE model_type = 'mortgage_lending'
-"""
-
-model = generate_semantic_model_from_env_and_query(
-    query=query,
-    output_path='production_model.yaml',
-    stage_name='@prod_models/mortgage/',
-    stage_filename_base='mortgage_semantic_model'
-)
-```
-
-## 🔍 Available Functions
-
-### Core Functions
-
-| Function | Description |
-|----------|-------------|
-| `generate_dynamic_semantic_model()` | Generate model from specific fact names |
-| `generate_semantic_model_from_snowflake()` | Generate model from Snowflake query with direct credentials |
-| `generate_semantic_model_from_env_and_query()` | Generate model from Snowflake query using environment variables |
-| `list_available_facts()` | List all facts available in facts.yaml |
-| `get_facts_by_names()` | Retrieve specific facts by name |
-
-### Utility Functions
-
-| Function | Description |
-|----------|-------------|
-| `generate_unique_filename()` | Create timestamp-based unique filenames |
-| `upload_to_snowflake_stage()` | Upload files to Snowflake stages |
-| `save_and_upload_to_stage()` | Save locally and upload to stage |
-| `load_yaml()` | Parse YAML files with error handling |
-
-## 🚦 Error Handling
-
-The system includes comprehensive error handling:
-
-- **Connection Errors**: Graceful handling of Snowflake connection failures
-- **Query Errors**: Clear error messages for SQL execution problems
-- **File Errors**: Validation for YAML parsing and file operations
-- **Stage Upload Errors**: Continues processing if stage upload fails
-- **Missing Facts**: Warnings for facts not found in facts.yaml
-
-## 🧪 Testing
-
-### Run Tests
-```bash
-# Test the workflow without Snowflake connection
-python test_snowflake_integration.py
-
-# Demo stage upload functionality
-python demo_stage_upload.py
-
-# View usage examples
-python snowflake_example.py
-```
-
-### Validate Your Setup
-```bash
-# Check available facts
-python -c "from main import list_available_facts; print(list_available_facts())"
-
-# Test YAML parsing
-python main.py
-```
-
-## 🤝 Contributing
-
-### Adding New Facts
-
-1. Edit `facts.yaml` to add new fact definitions:
-```yaml
-- name: NEW_FACT_NAME
-  expr: NEW_FACT_NAME
-  data_type: NUMBER(10,0)
-  description: Description of the new fact
-  sample_values: ['123', '456', '789']
-  synonyms: ['alias1', 'alias2']
-```
-
-2. Test the new fact:
-```python
-from main import get_facts_by_names
-facts = get_facts_by_names(['NEW_FACT_NAME'])
-print(facts)
-```
-
-### Modifying Base Configuration
-
-Edit `base.yaml` to update:
-- Model name and description
-- Table structure
-- Time dimensions
-- Verified queries
-
-## 📚 Best Practices
-
-### 1. Fact Naming Convention
-- Use consistent naming (e.g., `SNAKE_CASE`)
-- Match fact names exactly between data dictionary and facts.yaml
-- Include descriptive fact names
-
-### 2. Stage Organization
-```
-@production_models/
-├── mortgage_lending/
-├── customer_analytics/
-└── risk_assessment/
-```
-
-### 3. Environment Management
-- Use environment variables for production
-- Store credentials securely
-- Use different environments for dev/test/prod
-
-### 4. Version Control
-- Commit generated models for auditability
-- Tag releases with semantic versioning
-- Document fact library changes
-
-## 🔧 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
-#### "No facts found in facts.yaml"
-- Check that ELEMENT_NUMBER values from your query match fact names in facts.yaml
-- Verify facts.yaml format is correct
-
-#### "Snowflake connection failed"
-- Verify environment variables are set correctly
-- Check network connectivity to Snowflake
-- Validate account, warehouse, and database names
-
-#### "Stage upload failed"
-- Ensure stage exists in Snowflake
-- Check permissions for PUT operations
-- Verify stage name format (include @ prefix)
+1. **"Invalid OAuth access token"**: Your PAT token may be expired. Generate a new one.
+2. **"Password is empty"**: Make sure you're using either `token` OR `password`, not both.
+3. **"No semantic model files found"**: Ensure your YAML files are in the same directory as the scripts.
 
 ### Debug Mode
-```python
-# Enable detailed logging
-import logging
-logging.basicConfig(level=logging.DEBUG)
 
-# Run your generation code
+Run with debug information:
+```bash
+python -u test_api_only.py
 ```
 
-## 📞 Support
+## Requirements
 
-For issues or questions:
-1. Check the troubleshooting section above
-2. Review example scripts in the repository
-3. Create an issue in the repository
-4. Contact the team
+- Python 3.7+
+- Snowflake account with Cortex Analyst enabled
+- Personal Access Token or username/password
+- Required Python packages (see requirements.txt)
 
-## 🎉 Getting Started Checklist
+## Security Notes
 
-- [ ] Install required packages
-- [ ] Set up Snowflake environment variables  
-- [ ] Test connection with `python main.py`
-- [ ] Review available facts with `list_available_facts()`
-- [ ] Run your first query with sample data
-- [ ] Generate your first semantic model
-- [ ] Upload to a Snowflake stage
-- [ ] Share with your team!
+- Never commit your `config.env` file with real credentials
+- Use Personal Access Tokens instead of passwords when possible
+- Store sensitive information in environment variables in production
+- The provided `config.env` contains only placeholder values
 
----
+## Contributing
 
-**Happy modeling! 🚀**
-# dynamic_semantic_model_creation
+1. Fork the repository
+2. Create your feature branch
+3. Remove any hardcoded credentials before committing
+4. Test with the provided test scripts
+5. Submit a pull request
+
+## License
+
+This project is provided as-is for educational and development purposes.

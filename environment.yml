@@ -1,0 +1,8 @@
+# Snowflake environment configuration for Cortex Analyst Analytics App
+name: cortex_analyst_analytics
+channels:
+  - snowflake
+dependencies:
+  - python=3.11
+  - pandas
+  - streamlit

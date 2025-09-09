@@ -1,0 +1,86 @@
+name: mortgage_lending_prediction
+description: Data model containing information on mortgage loans applications. Rows
+  represent individual loan applications. Columns represent information on the type/amount/terms
+  of loan as well as income and other characteristics of the applicant.
+tables:
+- name: DEMO_MORTGAGE_LENDING_TEST_0
+  base_table:
+    database: E2E_SNOW_MLOPS_DB
+    schema: MLOPS_SCHEMA
+    table: DEMO_MORTGAGE_LENDING_TEST_0
+  time_dimensions:
+  - name: TIMESTAMP
+    expr: TIMESTAMP
+    data_type: TIMESTAMP_NTZ(9)
+    sample_values:
+    - 2024-07-26T13:44:41.280+0000
+    - 2025-03-17T07:39:12.960+0000
+    - 2025-03-13T23:24:34.560+0000
+    description: Date and time when the mortgage lending data was recorded or updated.
+    synonyms:
+    - date
+    - datetime
+    - creation_time
+    - record_time
+    - log_time
+    - event_time
+    - entry_time
+    - timestamp_value
+    - time_of_entry
+  facts:
+  - name: LOAN_AMOUNT
+    expr: LOAN_AMOUNT
+    data_type: NUMBER(38,0)
+    sample_values:
+    - '1080000'
+    - '2000000'
+    - '1240000'
+    description: The total amount borrowed by a customer to purchase a property, which
+      is the initial amount of the loan.
+    synonyms:
+    - loan_value
+    - borrowed_amount
+    - loan_size
+    - loan_principal
+    - amount_financed
+    - loan_size_amount
+  - name: INCOME
+    expr: INCOME
+    data_type: FLOAT
+    sample_values:
+    - '260000'
+    - '84000'
+    - '105000'
+    description: The annual income of the mortgage applicant.
+    synonyms:
+    - annual_income
+    - yearly_earnings
+    - household_income
+    - salary
+    - wages
+    - earnings
+    - revenue
+    - total_income
+    - gross_income
+  - name: MORTGAGERESPONSE
+    expr: MORTGAGERESPONSE
+    data_type: NUMBER(38,0)
+    sample_values:
+    - '1'
+    - '0'
+    description: Indicates whether the mortgage application was approved (1) or denied
+      (0).
+    synonyms:
+    - mortgage_approval
+    - loan_response
+    - mortgage_decision
+    - loan_outcome
+    - mortgage_result
+    - lender_response
+verified_queries:
+- name: Loan info for given loan_ID
+  question: What is the application info for loan id 100038
+  use_as_onboarding_question: false
+  sql: SELECT * FROM demo_mortgage_lending_test_1 WHERE loan_id = 100038
+  verified_by: Elliott Botwick
+  verified_at: 1747262312

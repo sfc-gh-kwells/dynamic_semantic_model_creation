@@ -1,43 +1,96 @@
 import yaml
 import json
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Union
 import copy
 import os
 from datetime import datetime
 import tempfile
 import snowflake.connector
 import pandas as pd
+import requests
+from io import StringIO
+import configparser
+import sys
 
 
-BASE_SEMANTIC_MODEL = "/Users/kwells/Desktop/repos/ca_dynamic_semantic_model/base.yaml"
-FACTS_FILE = "/Users/kwells/Desktop/repos/ca_dynamic_semantic_model/facts.yaml"
+# Get the directory where this script is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Use relative paths based on script location
+BASE_SEMANTIC_MODEL = os.path.join(SCRIPT_DIR, "base.yaml")
+FACTS_FILE = os.path.join(SCRIPT_DIR, "facts.yaml")
+CONFIG_FILE = os.path.join(SCRIPT_DIR, "config.env")
 
 
-def create_snowflake_connection(account, user, password, warehouse, database, schema, role=None):
+def load_config_from_file(config_path: str = CONFIG_FILE, connection_name: str = "my_example_connection") -> Dict[str, str]:
+    """
+    Load Snowflake connection details from config.env file.
+
+    config_path: Path to the config.env file
+    connection_name: Name of the connection section to load
+
+    Returns: Dictionary with connection parameters
+    """
+    try:
+        config = configparser.ConfigParser()
+        config.read(config_path)
+
+        section_name = f"connections.{connection_name}"
+        if section_name not in config:
+            raise ValueError(
+                f"Connection '{connection_name}' not found in config file")
+
+        connection_config = dict(config[section_name])
+        print(f"✅ Loaded config for connection: {connection_name}")
+
+        return connection_config
+
+    except Exception as e:
+        print(f"❌ Error loading config file: {e}")
+        raise
+
+
+def create_snowflake_connection(**kwargs):
     """
     Create a Snowflake connection.
 
+    Supports both password and Personal Access Token (PAT) authentication.
+
     Returns: snowflake connection object
     """
-    conn_params = {
-        'account': account,
-        'user': user,
-        'password': password,
-        'warehouse': warehouse,
-        'database': database,
-        'schema': schema,
-    }
+    # Get required parameters
+    account = kwargs.get('account')
+    user = kwargs.get('user')
 
-    if role:
-        conn_params['role'] = role
+    if not account or not user:
+        raise ValueError("account and user are required parameters")
+
+    # Prepare connection parameters - PAT as password replacement
+    conn_params = {k: v for k, v in kwargs.items() if k not in ['token']}
+
+    # Handle authentication - PAT as password replacement
+    if 'token' in kwargs:
+        # Use PAT as password (Snowflake drivers accept PAT as password replacement)
+        conn_params['password'] = kwargs['token']
+        print(f"🔐 Using Personal Access Token (PAT) as password replacement")
+    elif 'password' not in kwargs:
+        raise ValueError("Either password or token (PAT) must be provided")
+    else:
+        print(f"🔐 Using traditional password authentication")
 
     try:
+        print(f"🔗 Connecting to Snowflake account: {account}")
         conn = snowflake.connector.connect(**conn_params)
+        database = kwargs.get('database', 'N/A')
+        schema = kwargs.get('schema', 'N/A')
         print(f"✅ Connected to Snowflake: {database}.{schema}")
         return conn
     except Exception as e:
         print(f"❌ Failed to connect to Snowflake: {e}")
+        safe_params = {k: v for k, v in conn_params.items() if k not in [
+            'password']}
+        print(f"Connection params (excluding auth): {safe_params}")
         raise
 
 
@@ -190,36 +243,74 @@ def generate_semantic_model_from_snowflake(
     query: str,
     account: str,
     user: str,
-    password: str,
-    warehouse: str,
-    database: str,
-    schema: str,
+    password: str = None,
+    warehouse: str = None,
+    database: str = None,
+    schema: str = None,
     role: str = None,
+    token: str = None,
     base_path: str = BASE_SEMANTIC_MODEL,
     facts_path: str = FACTS_FILE,
     output_path: str = None,
     stage_name: str = None,
-    stage_filename_base: str = "semantic_model"
-) -> Dict[str, Any]:
+    stage_filename_base: str = "semantic_model",
+    return_yaml_string: bool = False
+) -> Union[Dict[str, Any], str]:
     """
     Execute Snowflake query to get fact names and generate semantic model using existing facts.
 
     query: SQL query string that returns ELEMENT_NUMBER column with fact names
-    account, user, password, warehouse, database, schema: Snowflake connection parameters
+    account, user: Snowflake connection parameters
+    password: Snowflake password (optional if token provided)
+    warehouse, database, schema: Snowflake connection parameters
     role: Optional Snowflake role
+    token: Personal Access Token (optional, alternative to password)
     base_path: Path to base semantic model YAML
     facts_path: Path to facts YAML file containing pre-created facts
     output_path: Optional path to save generated model locally
     stage_name: Optional Snowflake stage name to upload file (e.g., '@my_stage' or 'my_stage/folder/')
     stage_filename_base: Base name for stage file (timestamp will be added)
+    return_yaml_string: If True, return YAML string instead of dictionary (for direct API use)
 
-    Returns: Generated semantic model dictionary
+    Returns: Generated semantic model dictionary or YAML string (if return_yaml_string=True)
     """
-    # Create connection
-    conn = create_snowflake_connection(
-        account, user, password, warehouse, database, schema, role)
+    # Create connection - only pass non-None parameters
+    conn_params = {
+        'account': account,
+        'user': user
+    }
+
+    # Add authentication - PAT can be used as password replacement
+    if token:
+        # Use PAT as password (Snowflake drivers accept PAT as password replacement)
+        conn_params['password'] = token
+        print("🔐 Using Personal Access Token (PAT) as password replacement")
+    elif password:
+        conn_params['password'] = password
+        print("🔐 Using traditional password authentication")
+    else:
+        raise ValueError("Either password or token (PAT) must be provided")
+
+    # Add optional parameters
+    if warehouse:
+        conn_params['warehouse'] = warehouse
+    if database:
+        conn_params['database'] = database
+    if schema:
+        conn_params['schema'] = schema
+    if role:
+        conn_params['role'] = role
+
+    conn = create_snowflake_connection(**conn_params)
 
     try:
+        # Set warehouse if provided
+        if warehouse:
+            cursor = conn.cursor()
+            cursor.execute(f"USE WAREHOUSE {warehouse}")
+            print(f"🏭 Using warehouse: {warehouse}")
+            cursor.close()
+
         # Execute query using pandas
         print("🔍 Executing data dictionary query...")
         df = pd.read_sql(query, conn)
@@ -280,7 +371,11 @@ def generate_semantic_model_from_snowflake(
             except Exception as e:
                 print(f"⚠️ Failed to upload to stage: {e}")
 
-        return dynamic_model
+        # Return YAML string if requested, otherwise return dictionary
+        if return_yaml_string:
+            return convert_to_yaml_string(dynamic_model)
+        else:
+            return dynamic_model
 
     finally:
         # Always close the connection
@@ -294,8 +389,9 @@ def generate_semantic_model_from_env_and_query(
     facts_path: str = FACTS_FILE,
     output_path: str = None,
     stage_name: str = None,
-    stage_filename_base: str = "semantic_model"
-) -> Dict[str, Any]:
+    stage_filename_base: str = "semantic_model",
+    return_yaml_string: bool = False
+) -> Union[Dict[str, Any], str]:
     """
     Convenience function that uses environment variables for Snowflake connection.
 
@@ -313,8 +409,9 @@ def generate_semantic_model_from_env_and_query(
     output_path: Optional path to save generated model locally
     stage_name: Optional Snowflake stage name to upload file
     stage_filename_base: Base name for stage file (timestamp will be added)
+    return_yaml_string: If True, return YAML string instead of dictionary (for direct API use)
 
-    Returns: Generated semantic model dictionary
+    Returns: Generated semantic model dictionary or YAML string (if return_yaml_string=True)
     """
     account = os.getenv('SNOWFLAKE_ACCOUNT')
     user = os.getenv('SNOWFLAKE_USER')
@@ -354,7 +451,8 @@ def generate_semantic_model_from_env_and_query(
         facts_path=facts_path,
         output_path=output_path,
         stage_name=stage_name,
-        stage_filename_base=stage_filename_base
+        stage_filename_base=stage_filename_base,
+        return_yaml_string=return_yaml_string
     )
 
 
@@ -491,6 +589,22 @@ def save_yaml_file(data: Dict[str, Any], output_path: str):
         print(f"Error saving YAML file: {e}")
 
 
+def convert_to_yaml_string(data: Dict[str, Any]) -> str:
+    """
+    Convert dictionary data to a YAML string.
+
+    data: Dictionary to convert
+    Returns: YAML string representation
+    """
+    try:
+        yaml_string = yaml.dump(data, default_flow_style=False,
+                                sort_keys=False, indent=2)
+        return yaml_string
+    except Exception as e:
+        print(f"Error converting to YAML string: {e}")
+        return ""
+
+
 def list_available_facts(facts_path: str = FACTS_FILE) -> List[str]:
     """
     List all available fact names from the facts file.
@@ -508,78 +622,473 @@ def list_available_facts(facts_path: str = FACTS_FILE) -> List[str]:
     return fact_names
 
 
-def demonstrate_dynamic_generation():
-    """Demonstrate dynamic YAML generation with examples."""
+class CortexAnalystClient:
+    """
+    Client for interacting with Snowflake Cortex Analyst REST API.
+    """
 
-    print("=== Available Facts ===")
-    available_facts = list_available_facts()
-    print(f"Total facts available: {len(available_facts)}")
-    print(f"First 5 facts: {available_facts[:5]}")
+    def __init__(self, account_url: str, authorization_token: str,
+                 token_type: str = "PROGRAMMATIC_ACCESS_TOKEN"):
+        """
+        Initialize the Cortex Analyst client.
 
-    print("\n=== Example 1: Generate model with specific facts ===")
-    selected_facts = ["LOAN_AMOUNT", "INCOME", "MORTGAGERESPONSE"]
-    dynamic_model = generate_dynamic_semantic_model(
-        fact_names=selected_facts,
-        output_path="generated_model_example1.yaml"
+        account_url: Your Snowflake account URL (e.g., 'https://myaccount.snowflakecomputing.com')
+        authorization_token: PAT (Personal Access Token) or OAuth token
+        token_type: Type of authorization token (default: "PROGRAMMATIC_ACCESS_TOKEN" for PAT)
+        """
+        self.account_url = account_url.rstrip('/')
+        self.authorization_token = authorization_token
+        self.token_type = token_type
+        self.base_url = f"{self.account_url}/api/v2/cortex/analyst"
+
+    def send_message(self,
+                     question: str,
+                     semantic_model: str = None,
+                     semantic_model_file: str = None,
+                     stream: bool = False,
+                     conversation_history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+        """
+        Send a question to Cortex Analyst with a semantic model.
+
+        question: The user's question
+        semantic_model: YAML string of the semantic model (alternative to semantic_model_file)
+        semantic_model_file: Path to semantic model file in stage (alternative to semantic_model)
+        stream: Whether to use streaming response (default: False)
+        conversation_history: Optional previous messages for multi-turn conversation
+
+        Returns: API response dictionary
+        """
+        # Set up headers based on token type
+        if self.token_type == "PROGRAMMATIC_ACCESS_TOKEN":
+            headers = {
+                "Authorization": f"Bearer {self.authorization_token}",
+                "Content-Type": "application/json",
+                "X-Snowflake-Authorization-Token-Type": "PROGRAMMATIC_ACCESS_TOKEN"
+            }
+        else:
+            headers = {
+                "Authorization": f"Bearer {self.authorization_token}",
+                "Content-Type": "application/json",
+                "X-Snowflake-Authorization-Token-Type": self.token_type
+            }
+
+        # Build messages array
+        messages = []
+        if conversation_history:
+            messages.extend(conversation_history)
+
+        # Add current user message
+        messages.append({
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": question
+                }
+            ]
+        })
+
+        # Build payload - use either semantic_model or semantic_model_file
+        payload = {
+            "messages": messages,
+            "stream": stream
+        }
+
+        if semantic_model_file:
+            payload["semantic_model_file"] = semantic_model_file
+        elif semantic_model:
+            payload["semantic_model"] = semantic_model
+        else:
+            raise ValueError(
+                "Either semantic_model or semantic_model_file must be provided")
+
+        try:
+            response = requests.post(
+                f"{self.base_url}/message",
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
+            response.raise_for_status()
+
+            if stream:
+                return self._handle_streaming_response(response)
+            else:
+                return response.json()
+
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Error calling Cortex Analyst API: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"Response status: {e.response.status_code}")
+                print(f"Response body: {e.response.text}")
+            raise
+
+    def _handle_streaming_response(self, response) -> Dict[str, Any]:
+        """
+        Handle streaming server-sent events response.
+
+        response: Response object from requests
+        Returns: Assembled response dictionary
+        """
+        # This is a simplified streaming handler
+        # In practice, you'd want more sophisticated handling of server-sent events
+        full_response = {
+            "message": {
+                "role": "analyst",
+                "content": []
+            },
+            "warnings": [],
+            "response_metadata": {}
+        }
+
+        try:
+            for line in response.iter_lines(decode_unicode=True):
+                if line.startswith('data: '):
+                    event_data = line[6:]  # Remove 'data: ' prefix
+                    try:
+                        event_json = json.loads(event_data)
+                        # Handle different event types as needed
+                        # This is a simplified implementation
+                        print(f"📡 Streaming event: {event_json}")
+                    except json.JSONDecodeError:
+                        continue
+        except Exception as e:
+            print(f"⚠️ Error processing streaming response: {e}")
+
+        return full_response
+
+    def send_feedback(self, request_id: str, positive: bool,
+                      feedback_message: Optional[str] = None) -> bool:
+        """
+        Send feedback for a previous request.
+
+        request_id: The request ID from a previous message call
+        positive: True for positive feedback, False for negative
+        feedback_message: Optional feedback text
+
+        Returns: True if successful, False otherwise
+        """
+        headers = {
+            "Authorization": f"Bearer {self.authorization_token}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "request_id": request_id,
+            "positive": positive
+        }
+
+        if feedback_message:
+            payload["feedback_message"] = feedback_message
+
+        try:
+            response = requests.post(
+                f"{self.base_url}/feedback",
+                headers=headers,
+                json=payload,
+                timeout=30
+            )
+            response.raise_for_status()
+            return True
+
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Error sending feedback: {e}")
+            return False
+
+
+def generate_and_query_with_cortex_analyst(
+    query: str,
+    user_question: str,
+    client: CortexAnalystClient,
+    account: str,
+    user: str,
+    password: str,
+    warehouse: str,
+    database: str,
+    schema: str,
+    role: str = None,
+    base_path: str = BASE_SEMANTIC_MODEL,
+    facts_path: str = FACTS_FILE,
+    stream: bool = False
+) -> Dict[str, Any]:
+    """
+    Generate semantic model from Snowflake query and immediately use it with Cortex Analyst.
+
+    query: SQL query to get fact names
+    user_question: Question to ask Cortex Analyst
+    client: Initialized CortexAnalystClient
+    account, user, password, warehouse, database, schema: Snowflake connection parameters
+    role: Optional Snowflake role
+    base_path: Path to base semantic model YAML
+    facts_path: Path to facts YAML file
+    stream: Whether to use streaming response
+
+    Returns: Cortex Analyst API response
+    """
+    # Generate semantic model
+    print("🔄 Generating semantic model from Snowflake query...")
+    semantic_model_dict = generate_semantic_model_from_snowflake(
+        query=query,
+        account=account,
+        user=user,
+        password=password,
+        warehouse=warehouse,
+        database=database,
+        schema=schema,
+        role=role,
+        base_path=base_path,
+        facts_path=facts_path,
+        output_path=None,  # Don't save locally
+        stage_name=None    # Don't upload to stage
     )
 
-    print(
-        f"Generated model with {len(dynamic_model['tables'][0]['facts'])} facts")
-    for fact in dynamic_model['tables'][0]['facts']:
-        print(
-            f"  - {fact['name']}: {fact.get('description', 'No description')[:50]}...")
+    if not semantic_model_dict:
+        raise ValueError("Failed to generate semantic model")
 
-    print("\n=== Example 2: Generate model with loan-related facts ===")
-    loan_facts = [fact for fact in available_facts if 'LOAN' in fact]
-    print(f"Found {len(loan_facts)} loan-related facts: {loan_facts}")
+    # Convert to YAML string
+    print("📝 Converting semantic model to YAML string...")
+    semantic_model_yaml = convert_to_yaml_string(semantic_model_dict)
 
-    loan_model = generate_dynamic_semantic_model(
-        fact_names=loan_facts[:3],  # Take first 3 loan facts
-        output_path="generated_model_loan_focus.yaml"
+    if not semantic_model_yaml:
+        raise ValueError("Failed to convert semantic model to YAML string")
+
+    # Query Cortex Analyst
+    print("🤖 Sending question to Cortex Analyst...")
+    response = client.send_message(
+        question=user_question,
+        semantic_model=semantic_model_yaml,
+        stream=stream
     )
 
-    return dynamic_model, loan_model
+    return response
 
 
-def quick_validation(data):
-    """Quick validation of parsed YAML data."""
-    print("=== YAML Validation ===")
-    print(f"Model name: {data.get('name', 'Not found')}")
-    print(f"Description: {data.get('description', 'Not found')[:100]}...")
-    print(f"Number of tables: {len(data.get('tables', []))}")
+def test_with_config_file(
+    config_path: str = CONFIG_FILE,
+    connection_name: str = "my_example_connection",
+    test_query: str = None,
+    test_question: str = "What data is available in this model?",
+    oauth_token: str = None,
+    snowflake_pat: str = None
+) -> None:
+    """
+    Test the semantic model generation and Cortex Analyst API using config file.
 
-    if data.get('tables'):
-        first_table = data['tables'][0]
-        print(f"First table name: {first_table.get('name', 'Not found')}")
-        print(
-            f"Number of facts in first table: {len(first_table.get('facts', []))}")
+    config_path: Path to config.env file
+    connection_name: Connection name in config file
+    test_query: SQL query to generate semantic model (if None, uses sample tables query)
+    test_question: Question to ask Cortex Analyst
+    oauth_token: OAuth token for Cortex Analyst API (required for API test)
+    """
+    print("🧪 Testing Cortex Analyst integration with config file...")
+
+    try:
+        # Load configuration
+        print("\n1️⃣ Loading configuration...")
+        config = load_config_from_file(config_path, connection_name)
+
+        # Test Snowflake connection
+        print("\n2️⃣ Testing Snowflake connection...")
+
+        # Build connection parameters - ONLY include the auth method we need
+        conn_params = {
+            'account': config['account'],
+            'user': config['user'],
+            'warehouse': config['warehouse'],
+            'database': config['database'],
+            'schema': config['schema'],
+        }
+
+        if config.get('role'):
+            conn_params['role'] = config.get('role')
+
+        # Add ONLY the authentication method we're using
+        if snowflake_pat or config.get('token'):
+            # Will be converted to password in create_snowflake_connection
+            conn_params['token'] = snowflake_pat or config['token']
+            print("🔐 Using Personal Access Token from config")
+        elif config.get('password'):
+            conn_params['password'] = config['password']
+            print("🔐 Using password authentication")
+        else:
+            raise ValueError(
+                "No authentication method found in config (need 'token' or 'password')")
+
+        conn = create_snowflake_connection(**conn_params)
+
+        # If no test query provided, use a sample query to list available tables
+        if not test_query:
+            test_query = f"""
+                SELECT TABLE_NAME as ELEMENT_NUMBER 
+                FROM INFORMATION_SCHEMA.TABLES 
+                WHERE TABLE_SCHEMA = '{config['schema']}'
+                AND TABLE_TYPE = 'BASE TABLE'
+                LIMIT 5
+            """
+            print(
+                f"📊 Using sample query to find tables in {config['database']}.{config['schema']}")
+
+        print(f"\n3️⃣ Test Query: {test_query}")
+
+        # Generate semantic model as YAML string
+        print("\n4️⃣ Generating semantic model...")
+        try:
+            # Build connection params for semantic model generation
+            gen_params = {
+                'query': test_query,
+                'account': config['account'],
+                'user': config['user'],
+                'warehouse': config['warehouse'],
+                'database': config['database'],
+                'schema': config['schema'],
+                'role': config.get('role'),
+                'return_yaml_string': True
+            }
+
+            # Add authentication method - only one of password or token
+            if snowflake_pat or config.get('token'):
+                gen_params['token'] = snowflake_pat or config['token']
+                # Do NOT pass password when using token
+                print("🔐 Using PAT authentication for semantic model generation")
+            elif config.get('password'):
+                gen_params['password'] = config['password']
+                print("🔐 Using password authentication for semantic model generation")
+            else:
+                raise ValueError("No authentication method found in config")
+
+            semantic_model_yaml = generate_semantic_model_from_snowflake(
+                **gen_params)
+
+            if semantic_model_yaml:
+                print("✅ Semantic model generated successfully!")
+                print(f"📄 Model length: {len(semantic_model_yaml)} characters")
+                print("\n--- Generated Semantic Model (first 500 chars) ---")
+                print(semantic_model_yaml[:500] + "..." if len(
+                    semantic_model_yaml) > 500 else semantic_model_yaml)
+                print("--- End Model Sample ---\n")
+            else:
+                print("❌ No semantic model generated (empty result)")
+                return
+
+        except Exception as e:
+            print(f"❌ Error generating semantic model: {e}")
+            return
+
+        # Test Cortex Analyst API if OAuth token provided
+        if oauth_token:
+            print("5️⃣ Testing Cortex Analyst REST API...")
+
+            # Build account URL from account identifier
+            account_parts = config['account'].split('.')
+            if len(account_parts) >= 2:
+                account_url = f"https://{config['account']}.snowflakecomputing.com"
+            else:
+                account_url = f"https://{config['account']}.snowflakecomputing.com"
+
+            try:
+                client = CortexAnalystClient(
+                    account_url=account_url,
+                    authorization_token=oauth_token
+                )
+
+                print(f"🤖 Asking question: '{test_question}'")
+                response = client.send_message(
+                    question=test_question,
+                    semantic_model=semantic_model_yaml
+                )
+
+                print("✅ Cortex Analyst API response received!")
+                print("\n--- API Response ---")
+
+                # Extract and display response content
+                if 'message' in response and 'content' in response['message']:
+                    for content in response['message']['content']:
+                        if content.get('type') == 'text':
+                            print(f"📝 Analysis: {content.get('text', 'N/A')}")
+                        elif content.get('type') == 'sql':
+                            print(
+                                f"💾 Generated SQL: {content.get('statement', 'N/A')}")
+                        elif content.get('type') == 'suggestions':
+                            suggestions = content.get('suggestions', [])
+                            if suggestions:
+                                print(
+                                    f"💡 Suggestions: {', '.join(suggestions)}")
+
+                if 'warnings' in response and response['warnings']:
+                    print(
+                        f"⚠️ Warnings: {len(response['warnings'])} warning(s)")
+                    for warning in response['warnings']:
+                        print(
+                            f"   - {warning.get('message', 'Unknown warning')}")
+
+                if 'request_id' in response:
+                    print(f"🔍 Request ID: {response['request_id']}")
+
+                print("--- End API Response ---\n")
+
+            except Exception as e:
+                print(f"❌ Error calling Cortex Analyst API: {e}")
+        else:
+            print("5️⃣ Skipping Cortex Analyst API test (no OAuth token provided)")
+            print("💡 To test the API, provide an OAuth token:")
+            print("   test_with_config_file(oauth_token='your_oauth_token')")
+            print("\n✅ Semantic model generation test completed successfully!")
+
+    except Exception as e:
+        print(f"❌ Test failed: {e}")
+        raise
 
 
 if __name__ == "__main__":
-    print("Dynamic Semantic Model Generator")
-    print("=" * 40)
 
-    # Demonstrate the new dynamic generation functionality
-    demonstrate_dynamic_generation()
+    print("\n🚀 Cortex Analyst API Integration Tool")
+    print("=====================================")
 
-    print("\n=== Testing base model loading ===")
-    base_model = load_yaml(BASE_SEMANTIC_MODEL)
-    quick_validation(base_model)
+    # Check if we should run the test
+    if len(sys.argv) > 1 and sys.argv[1] == "test":
+        # For Cortex Analyst API, use PAT from config instead of separate OAuth token
+        print("🎯 Will test both semantic model generation and Cortex Analyst API")
 
-    print("\n=== Snowflake Integration Available ===")
-    print("✅ Snowflake functionality is available!")
+        # Load config to get PAT token for API
+        try:
+            config = load_config_from_file()
+            pat_token = config.get('token')
+
+            if pat_token:
+                print("✅ Found PAT token in config for Cortex Analyst API")
+                test_with_config_file(oauth_token=pat_token)
+            else:
+                oauth_token = input(
+                    "Enter PAT token for Cortex Analyst API (or press Enter to skip): ")
+                test_with_config_file(
+                    oauth_token=oauth_token if oauth_token.strip() else None)
+
+        except Exception as e:
+            print(f"⚠️ Could not load config: {e}")
+            oauth_token = input(
+                "Enter PAT token for Cortex Analyst API (or press Enter to skip): ")
+            test_with_config_file(
+                oauth_token=oauth_token if oauth_token.strip() else None)
+    else:
+        print("\nQuick Start:")
+        print("1. Run semantic model generation test:")
+        print("   python main.py test")
+        print("\n2. For full API test, set OAuth token:")
+        print("   export SNOWFLAKE_OAUTH_TOKEN='your_token'")
+        print("   python main.py test")
+
     print("\nExample usage:")
     print("""
-# Method 1: Direct connection parameters
-# Query just needs to return ELEMENT_NUMBER column that matches fact names in facts.yaml
-query = '''
-SELECT ELEMENT_NUMBER
-FROM your_database.your_schema.data_dictionary_table
-WHERE condition = 'your_filter'
-'''
+    # Method 1: Direct connection parameters
+    # Query just needs to return ELEMENT_NUMBER column that matches fact names in facts.yaml
+    query = '''
+    SELECT ELEMENT_NUMBER
+    FROM your_database.your_schema.data_dictionary_table
+    WHERE condition = 'your_filter'
+    '''
 
-# Save locally only
-model = generate_semantic_model_from_snowflake(
+# Generate semantic model as YAML string for direct API use
+semantic_model_yaml = generate_semantic_model_from_snowflake(
     query=query,
     account='your_account.region',
     user='your_username',
@@ -587,9 +1096,23 @@ model = generate_semantic_model_from_snowflake(
     warehouse='your_warehouse',
     database='your_database',
     schema='your_schema',
-    output_path='snowflake_generated_model.yaml'
+    return_yaml_string=True  # Returns YAML string instead of dictionary
 )
 
+# Now use with Cortex Analyst REST API
+client = CortexAnalystClient(
+    account_url='https://your_account.snowflakecomputing.com',
+    authorization_token='your_oauth_token'
+)
+
+response = client.send_message(
+    question="What was the total revenue last quarter?",
+    semantic_model=semantic_model_yaml
+)
+
+print("Cortex Analyst Response:", response)
+
+# Method 2: Traditional file-based approach
 # Save locally AND upload to Snowflake stage with timestamp
 model = generate_semantic_model_from_snowflake(
     query=query,
@@ -605,22 +1128,58 @@ model = generate_semantic_model_from_snowflake(
 )
 # This creates a file like: mortgage_model_20241215_143022.yaml in the stage
 
-# Method 2: Using environment variables (recommended)
+# Method 3: Using environment variables (recommended for API integration)
 # Set these environment variables first:
 # SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PASSWORD, 
 # SNOWFLAKE_WAREHOUSE, SNOWFLAKE_DATABASE, SNOWFLAKE_SCHEMA
 
-model = generate_semantic_model_from_env_and_query(
+# Get YAML string for API use
+semantic_model_yaml = generate_semantic_model_from_env_and_query(
     query=query,
-    output_path='env_generated_model.yaml',
-    stage_name='@my_models_stage',
-    stage_filename_base='dynamic_semantic_model'
+    return_yaml_string=True
 )
 
-# The function will:
+# Method 4: Complete end-to-end workflow with environment variables
+client = CortexAnalystClient(
+    account_url='https://your_account.snowflakecomputing.com',
+    authorization_token=os.getenv('SNOWFLAKE_OAUTH_TOKEN')
+)
+
+# This function does everything: generates model and queries Cortex Analyst
+response = generate_and_query_with_cortex_analyst(
+    query=query,
+    user_question="Which products had the highest sales?",
+    client=client,
+    account=os.getenv('SNOWFLAKE_ACCOUNT'),
+    user=os.getenv('SNOWFLAKE_USER'),
+    password=os.getenv('SNOWFLAKE_PASSWORD'),
+    warehouse=os.getenv('SNOWFLAKE_WAREHOUSE'),
+    database=os.getenv('SNOWFLAKE_DATABASE'),
+    schema=os.getenv('SNOWFLAKE_SCHEMA'),
+    stream=False  # Set to True for streaming responses
+)
+
+# Extract SQL and text from response
+if 'message' in response and 'content' in response['message']:
+    for content in response['message']['content']:
+        if content.get('type') == 'sql':
+            print("Generated SQL:", content.get('statement'))
+        elif content.get('type') == 'text':
+            print("Analysis:", content.get('text'))
+
+# Send feedback if desired
+if 'request_id' in response:
+    client.send_feedback(
+        request_id=response['request_id'],
+        positive=True,
+        feedback_message="Great analysis!"
+    )
+
+# The functions will:
 # 1. Execute your query to get ELEMENT_NUMBER values
 # 2. Look up matching facts in facts.yaml 
 # 3. Combine with base.yaml to create the semantic model
-# 4. Save locally (if output_path provided)
-# 5. Upload to Snowflake stage with unique timestamp name (if stage_name provided)
+# 4. Convert to YAML string (if return_yaml_string=True)
+# 5. Send to Cortex Analyst REST API
+# 6. Return the analysis results
         """)
